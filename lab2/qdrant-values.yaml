@@ -1,0 +1,10 @@
+service:
+  type: ClusterIP
+
+persistence:
+  enabled: true
+  storageClass: "microk8s-hostpath"
+  size: 2Gi
+
+config:
+  log_level: INFO

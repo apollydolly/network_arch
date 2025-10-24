@@ -1,0 +1,37 @@
+expose:
+  type: ingress
+  tls:
+    secretName: "labs-itmo-tls"
+  ingress:
+    className: "nginx"
+    hosts:
+      core: harbor.k8s.labs.itmo.loc
+
+externalURL: https://harbor.k8s.labs.itmo.loc
+
+persistence:
+  enabled: true
+  resourcePolicy: "keep"
+  persistentVolumeClaim:
+    registry:
+      storageClass: "microk8s-hostpath"
+      size: 5Gi
+    chartmuseum:
+      storageClass: "microk8s-hostpath"
+      size: 5Gi
+    jobservice:
+      storageClass: "microk8s-hostpath"
+      size: 1Gi
+    database:
+      storageClass: "microk8s-hostpath"
+      size: 1Gi
+    redis:
+      storageClass: "microk8s-hostpath"
+      size: 1Gi
+
+harborAdminPassword: "pass123"
+
+chartmuseum:
+  enabled: true
+trivy:
+  enabled: true
