@@ -1,0 +1,23 @@
+[Unit]
+Description=MLflow Tracking Server
+After=network.target
+
+[Service]
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/home/user/lab3/mlflow-server
+Environment=MLFLOW_TRACKING_URI=https://mlflow.labs.itmo.loc
+Environment=GUNICORN_CMD_ARGS=--timeout 300
+ExecStart=/home/user/lab3/mlflow-env/bin/mlflow server \
+    --host 127.0.0.1 \
+    --port 5000 \
+    --backend-store-uri sqlite:////home/user/lab3/mlflow-server/db/mlflow.db \
+    --default-artifact-root /home/user/lab3/mlflow-server/artifacts \
+    --serve-artifacts \
+    --allowed-hosts "mlflow.labs.itmo.loc,127.0.0.1,localhost,0.0.0.0"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
