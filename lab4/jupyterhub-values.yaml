@@ -1,0 +1,45 @@
+proxy:
+  secretToken: "a86546201ff9c5d8db5feaa536011b9a20431d260ea12562fa0a7a3e20c31ee6"
+  service:
+    type: ClusterIP
+
+hub:
+  config:
+    JupyterHub:
+      authenticator_class: dummy
+    DummyAuthenticator:
+      password: "admin123"
+    Authenticator:
+      admin_users:
+        - admin
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+  hosts:
+    - jupyter.k8s.labs.itmo.loc
+  tls:
+    - secretName: labs-itmo-tls
+      hosts:
+        - jupyter.k8s.labs.itmo.loc
+
+singleuser:
+  image:
+    name: jupyter/datascience-notebook
+    tag: latest
+  defaultUrl: "/lab"
+  storage:
+    type: dynamic
+    dynamic:
+      storageClass: microk8s-hostpath
+
+hub:
+  networkPolicy:
+    enabled: false
+singleuser:
+  networkPolicy:
+    enabled: false
