@@ -2,8 +2,20 @@ from fastapi import FastAPI, HTTPException
 from app.redis_client import get_cached_data, set_cached_data
 from app.qdrant_client import upsert_vector, search_vectors
 from app.models import Item, SearchResponse
+import requests
+from pydantic import BaseModel
 
 app = FastAPI(title="Vector Search App")
+
+class InferenceRequest(BaseModel):
+    features: list[float]
+
+class InferenceResponse(BaseModel):
+    prediction: int
+    probability: float
+    model_name: str
+
+INFERENCE_SERVICE_URL = "http://inference-service.default.svc.cluster.local:8000"
 
 @app.get("/health")
 def health_check():
@@ -57,3 +69,44 @@ def set_cache(key: str, value: str):
         return {"status": "cached"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cache error: {str(e)}")
+        
+@app.post("/ml-predict/")
+async def ml_predict(request: InferenceRequest):
+    """Предсказание через ML модель"""
+    try:
+        response = requests.post(
+            f"{INFERENCE_SERVICE_URL}/predict",
+            json={"features": request.features},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Inference service error: {str(e)}"
+        )
+
+@app.get("/ml-health/")
+async def ml_health():
+    """Проверка здоровья ML сервиса"""
+    try:
+        response = requests.get(f"{INFERENCE_SERVICE_URL}/health", timeout=5)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Inference service unavailable: {str(e)}"
+        )
+
+@app.get("/ml-example/")
+async def ml_example():
+    """Пример предсказания"""
+    try:
+        response = requests.get(f"{INFERENCE_SERVICE_URL}/example", timeout=5)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Inference service unavailable: {str(e)}"
+        )

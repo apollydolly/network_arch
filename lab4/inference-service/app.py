@@ -5,26 +5,24 @@ from pydantic import BaseModel
 import numpy as np
 import logging
 from typing import List
+import urllib3
+from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
+from fastapi import Response
+import time
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-MLFLOW_TRACKING_URI = "https://mlflow.labs.itmo.loc"
-MODEL_NAME = "Lab4-Classification-Model"
-MODEL_STAGE = "Production"
-
-print(f"Using MLflow at: {MLFLOW_TRACKING_URI}")
-
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 os.environ['MLFLOW_TRACKING_INSECURE_TLS'] = 'true'
 
 app = FastAPI(
     title="ML Inference Service",
-    description="Сервис для предсказаний с загрузкой моделей из MLflow Registry",
+    description="Сервис для предсказаний с моделью из MLflow",
     version="1.0.0"
 )
 
+MODEL_PATH = "/app/model"
 model = None
+PREDICTION_COUNTER = Counter('inference_predictions_total', 'Total prediction requests', ['status'])
+PREDICTION_DURATION = Histogram('inference_prediction_duration_seconds', 'Prediction request duration')
 
 class PredictionRequest(BaseModel):
     features: List[float]
@@ -32,8 +30,7 @@ class PredictionRequest(BaseModel):
 class PredictionResponse(BaseModel):
     prediction: int
     probability: float
-    model_name: str = "Lab4-Classification-Model"
-    model_source: str = "MLflow Registry"
+    model_name: str = "Lab4-Simple-Final"
     
     class Config:
         protected_namespaces = ()
@@ -41,26 +38,24 @@ class PredictionResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     global model
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
     logger.info("Starting Inference Service...")
-    logger.info(f"MLflow Tracking URI: {mlflow.get_tracking_uri()}")
-    logger.info(f"Loading model: {MODEL_NAME} (Stage: {MODEL_STAGE})")
+    logger.info(f"Loading model from: {MODEL_PATH}")
     
     try:
-        model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
-        logger.info(f"Model URI: {model_uri}")
-        
-        model = mlflow.sklearn.load_model(model_uri)
-        
-        logger.info("Model loaded successfully from MLflow Registry!")
+        model = mlflow.sklearn.load_model(MODEL_PATH)
+        logger.info("Model loaded successfully!")
         logger.info(f"Model type: {type(model)}")
-        
+  
         if hasattr(model, 'n_features_in_'):
             logger.info(f"Model expects {model.n_features_in_} features")
-        if hasattr(model, 'n_estimators'):
-            logger.info(f"Model has {model.n_estimators} estimators")
+        else:
+            logger.info("Model n_features_in_ attribute not found, assuming 20 features")
         
     except Exception as e:
-        logger.error(f"Failed to load model from MLflow Registry: {e}")
+        logger.error(f"Failed to load model: {e}")
         raise e
 
 @app.get("/")
@@ -69,10 +64,7 @@ async def root():
         "service": "ML Inference Service", 
         "status": "running",
         "model_loaded": model is not None,
-        "model_name": MODEL_NAME,
-        "model_stage": MODEL_STAGE,
-        "mlflow_tracking_uri": mlflow.get_tracking_uri(),
-        "model_source": "MLflow Model Registry"
+        "model_name": "Lab4-Simple-Final"
     }
 
 @app.get("/health")
@@ -80,59 +72,50 @@ async def health():
     status = "healthy" if model is not None else "degraded"
     return {
         "status": status,
-        "model_loaded": model is not None,
-        "model_name": MODEL_NAME,
-        "model_stage": MODEL_STAGE,
-        "mlflow_uri": mlflow.get_tracking_uri()
+        "model_loaded": model is not None
     }
 
-@app.get("/model-info")
-async def model_info():
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-    
-    info = {
-        "model_name": MODEL_NAME,
-        "model_stage": MODEL_STAGE,
-        "model_type": type(model).name,
-        "mlflow_tracking_uri": mlflow.get_tracking_uri(),
-        "source": "MLflow Model Registry",
-        "run_id": "1750b23f64854374ab838f4e967cbec6"
-    }
-    
-    if hasattr(model, 'n_features_in_'):
-        info["n_features"] = model.n_features_in_
-    if hasattr(model, 'n_estimators'):
-        info["n_estimators"] = model.n_estimators
-    if hasattr(model, 'feature_names_in_'):
-        info["feature_names"] = model.feature_names_in_.tolist()
-        
-    return info
+@app.get("/metrics")
+async def metrics():
+    return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
+    start_time = time.time()
+    
     if model is None:
+        PREDICTION_COUNTER.labels(status='error').inc()
         raise HTTPException(status_code=503, detail="Model not loaded")
     
     try:
-        features_array = np.array([request.features])
-        if hasattr(model, 'n_features_in_') and len(request.features) != model.n_features_in_:
+        expected_features = model.n_features_in_ if hasattr(model, 'n_features_in_') else 20
+        
+        if len(request.features) != expected_features:
+            PREDICTION_COUNTER.labels(status='error').inc()
+            PREDICTION_DURATION.observe(time.time() - start_time)
             raise HTTPException(
                 status_code=400, 
-                detail=f"Expected {model.n_features_in_} features, got {len(request.features)}"
+                detail=f"Expected {expected_features} features, got {len(request.features)}"
             )
-
+        
+        features_array = np.array([request.features])
         prediction = model.predict(features_array)
         probability = model.predict_proba(features_array).max()
         
+        PREDICTION_COUNTER.labels(status='success').inc()
+        PREDICTION_DURATION.observe(time.time() - start_time)
+        
         return PredictionResponse(
             prediction=int(prediction[0]),
-            probability=float(probability),
-            model_name=MODEL_NAME,
-            model_source="MLflow Registry"
+            probability=float(probability)
         )
         
+    except HTTPException:
+        PREDICTION_DURATION.observe(time.time() - start_time)
+        raise
     except Exception as e:
+        PREDICTION_COUNTER.labels(status='error').inc()
+        PREDICTION_DURATION.observe(time.time() - start_time)
         raise HTTPException(status_code=400, detail=f"Prediction error: {str(e)}")
 
 @app.get("/example")
@@ -140,13 +123,7 @@ async def example_prediction():
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    if hasattr(model, 'n_features_in_'):
-        n_features = model.n_features_in_
-    else:
-        n_features = 20  # fallback
-
-    example_features = [0.1] * n_features
-    
+    example_features = [0.1] * 20
     features_array = np.array([example_features])
     prediction = model.predict(features_array)
     probability = model.predict_proba(features_array).max()
@@ -154,7 +131,6 @@ async def example_prediction():
     return {
         "prediction": int(prediction[0]),
         "probability": float(probability),
-        "features_used": n_features,
-        "model_name": MODEL_NAME,
-        "model_source": "MLflow Registry"
+        "features_used": 20,
+        "model_name": "Lab4-Simple-Final"
     }

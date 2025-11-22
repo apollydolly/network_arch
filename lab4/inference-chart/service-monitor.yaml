@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "inference-service.fullname" . }}
+  labels:
+    {{- include "inference-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inference
+spec:
+  selector:
+    matchLabels:
+      {{- include "inference-service.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s

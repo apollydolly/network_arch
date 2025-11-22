@@ -5,7 +5,7 @@ replicaCount: 1
 image:
   repository: harbor.k8s.labs.itmo.loc/public/my-app
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: "lab4"
 
 imagePullSecrets: []
 nameOverride: ""
