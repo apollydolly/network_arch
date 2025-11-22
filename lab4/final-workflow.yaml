@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: final-test-
+  namespace: argo
+spec:
+  entrypoint: main-pipeline
+  templates:
+  - name: main-pipeline
+    steps:
+    - - name: test-with-git
+        template: test-with-git-image
+
+  - name: test-with-git-image
+    container:
+      image: python:3.10-slim
+      command: [sh, -c]
+      args:
+      - |
+        apt-get update && apt-get install -y git
+        git clone https://github.com/apollydolly/network_arch.git /tmp/src
+        cd /tmp/src/lab2/my-app
+        pip install -r requirements.txt pytest
+        python -m pytest tests/test_mocked.py -v
+        echo "Workflow completed successfully"
